@@ -1,0 +1,3 @@
+/home/loading/Desktop/RCOM/RCOM-Lab1/cmake-build-debug/CMakeFiles/RCOM_Lab1.dir
+/home/loading/Desktop/RCOM/RCOM-Lab1/cmake-build-debug/CMakeFiles/edit_cache.dir
+/home/loading/Desktop/RCOM/RCOM-Lab1/cmake-build-debug/CMakeFiles/rebuild_cache.dir
