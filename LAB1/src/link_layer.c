@@ -259,6 +259,8 @@ int llwrite(const unsigned char *buf, int bufSize)
 {
     printf("Writting bytes...\n");
 
+    alarmCount = 0;
+
     unsigned char iframe[bufSize*2], bcc2 = 0;
     int idx = 0;
 
