@@ -7,63 +7,10 @@
 #include <unistd.h>
 #include <stdio.h>
 
-#define CTRL_START 1
-#define CTRL_END   3
-#define PACKET_START    0x01
-#define PACKET_DATA     0x02
-#define PACKET_END      0x03
-#define PACKET_FSIZE    0x00
-#define FILE_NAME  1
-#define FILE_SIZE  0
-
-
-
-int sendControlPacket(unsigned char control, size_t size) {
-    unsigned char packet[MAX_PAYLOAD_SIZE] = {0};
-
-    packet[0] = control;
-    packet[1] = PACKET_FSIZE;
-    packet[2] = 4;
-    packet[3] = size >> 24;
-    packet[4] = (size >> 16) & 0xFF;
-    packet[5] = (size >> 8) & 0xFF;
-    packet[6] = size & 0xFF;
-
-    if ((llwrite(packet, 7) == -1)) {
-        printf("Error sending control packet!\n");
-        exit(-1);
-    } else {
-        printf("Control packet sent!\n");
-    }
-
-    return 0;
-}
-
-int receiveControlPacket(unsigned char control, size_t *size) {
-    unsigned char packet[MAX_PAYLOAD_SIZE] = {0};
-    llread(packet);
-
-    if (packet[0] != control) {
-        printf("Error receiving control packet on byte 0!\n");
-        exit(-1);
-    }
-
-    if (packet[1] != PACKET_FSIZE) {
-        printf("Error receiving control packeton byte 1!\n");
-        exit(-1);
-    }
-
-    if (packet[2] != 4) {
-        printf("Error receiving control packet on byte 2!\n");
-        exit(-1);
-    }
-
-    *size = (packet[3] << 24) | (packet[4] << 16) | (packet[5] << 8) | packet[6];
-
-    printf("Control packet received!\n");
-
-    return 0;
-}
+#define TYPE_START 0x01
+#define TYPE_END 0x03
+#define TYPE_DATA 0x02
+#define FILE_SIZE 0x00
 
 void applicationLayer(const char *serialPort, const char *role, int baudRate, int nTries, int timeout, const char *filename) {
 
@@ -79,6 +26,7 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate, in
     } else {
         info.role = LlRx;
     }
+
 
     if (llopen(info) < 0) {
         printf("Failed to open connection\n");
@@ -97,47 +45,80 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate, in
         }
 
         fseek(file, 0, SEEK_END);
-        size_t size = ftell(file);
+        size_t f_size = ftell(file);
         fseek(file, 0, SEEK_SET);
 
-        if (sendControlPacket(PACKET_START, size) != 0) {
-            printf("Error sending control packet!\n");
+        unsigned char CTRLpacket_START[MAX_PAYLOAD_SIZE] = {0};
+
+        CTRLpacket_START[0] = TYPE_START;
+        CTRLpacket_START[1] = FILE_SIZE;
+        CTRLpacket_START[2] = 4;
+
+        CTRLpacket_START[3] = f_size >> 24;
+        CTRLpacket_START[4] = (f_size >> 16) & 0xFF;
+        CTRLpacket_START[5] = (f_size >> 8) & 0xFF;
+        CTRLpacket_START[6] = f_size & 0xFF;
+
+        printf("Sending START control packet...\n");
+
+        if ((llwrite(CTRLpacket_START, 7) < 0)) {
+            printf("Error sending control packet START\n");
             fclose(file);
             exit(-1);
+        } else {
+            printf("Control packet START sent successfully!\n");
         }
-        int packetNumber = 0, bytesRead = 0;
-        unsigned char buffer[MAX_PAYLOAD_SIZE] = {0};
 
+        int packetNum = 0;
+        int bytesReadFromFile = 0;
+        unsigned char temp[MAX_PAYLOAD_SIZE] = {0};
 
+        while ((bytesReadFromFile = fread(temp, 1, MAX_PAYLOAD_SIZE, file)) > 0) {
+            printf("\nCurrent packet's number: %d\n", packetNum);
 
-        while ((bytesRead = fread(buffer, 1, MAX_PAYLOAD_SIZE, file)) > 0) {
-            printf("\nPacket Number: %d\n", packetNumber);
-            unsigned char packet[MAX_PAYLOAD_SIZE + 4];
-            packet[0] = PACKET_DATA;
-            packet[1] = packetNumber;
-            packet[2] = (bytesRead >> 8) & 0xFF;
-            packet[3] = bytesRead & 0xFF;
+            unsigned char DATApacket[MAX_PAYLOAD_SIZE + 4];
 
-            memcpy(&packet[4], buffer, bytesRead);
+            DATApacket[0] = TYPE_DATA;
+            DATApacket[1] = packetNum;
+            DATApacket[2] = (bytesReadFromFile >> 8) & 0xFF;
+            DATApacket[3] = bytesReadFromFile & 0xFF;
 
-            if (llwrite(packet, bytesRead + 4) < 0) {
-                printf("Error sending data packet!\n");
+            for (int i = 0; i < bytesReadFromFile; i++) {
+                DATApacket[4 + i] = temp[i];
+            }
+
+            if (llwrite(DATApacket, bytesReadFromFile + 4) < 0) {
+                printf("Error sending data packet\n");
                 fclose(file);
                 exit(-1);
             }
 
-            packetNumber = (packetNumber + 1) % 100;
+            packetNum++;
         }
 
-        if (sendControlPacket(PACKET_END, size) != 0) {
-            printf("Error sending control packet!\n");
+        unsigned char CTRLpacket_END[MAX_PAYLOAD_SIZE] = {0};
+
+        CTRLpacket_END[0] = TYPE_END;
+        CTRLpacket_END[1] = FILE_SIZE;
+        CTRLpacket_END[2] = 4;
+
+        CTRLpacket_END[3] = f_size >> 24;
+        CTRLpacket_END[4] = (f_size >> 16) & 0xFF;
+        CTRLpacket_END[5] = (f_size >> 8) & 0xFF;
+        CTRLpacket_END[6] = f_size & 0xFF;
+
+        printf("\nSending END control packet...\n");
+
+        if ((llwrite(CTRLpacket_END, 7) < 0)) {
+            printf("Error sending control packet END\n");
             fclose(file);
             exit(-1);
+        } else {
+            printf("\nControl packet END sent successfully!\n");
         }
 
-        printf("File transmission successful\n");
+        printf("\nFile transmission successful!\n");
         fclose(file);
-        return;
 
     } else if (info.role == LlRx) {
 
@@ -149,56 +130,71 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate, in
             return;
         }
 
-        size_t filesize = 0;
+        size_t f_size = 0;
 
-        if (receiveControlPacket(PACKET_START, &filesize) != 0) {
-            printf("Error receiving control packet!\n");
+        unsigned char CTRLpacket_START[MAX_PAYLOAD_SIZE] = {0};
+
+        llread(CTRLpacket_START);
+
+        if (CTRLpacket_START[0] != TYPE_START || CTRLpacket_START[1] != FILE_SIZE || CTRLpacket_START[2] != 4) {
+            printf("Error receiving the first bytes of control packet START\n");
             fclose(file);
             exit(-1);
         }
 
-        unsigned char buffer[MAX_PAYLOAD_SIZE] = {0};
-        int bytesWritten = 0;
-        int packetNumber = 0;
+        f_size = (CTRLpacket_START[3] << 24) | (CTRLpacket_START[4] << 16) | (CTRLpacket_START[5] << 8) | CTRLpacket_START[6];
+        printf("\nControl packet START received successfully!\n");
 
-        while (bytesWritten < filesize) {
-            printf("\nPacket number: %d\n", packetNumber);
-            unsigned char packet[MAX_PAYLOAD_SIZE + 4] = {0};
-            int bytesSent = llread(packet);
+        int packetNum = 0;
+        int bytesWrittenIntoNewFile = 0;
+        unsigned char temp[MAX_PAYLOAD_SIZE] = {0};
 
-            if (packet[0] != PACKET_DATA) {
-                printf("Error receiving data packet!\n");
+        while (bytesWrittenIntoNewFile < f_size) {
+            printf("\nCurrent packet's number: %d", packetNum);
+
+            unsigned char DATApacket[MAX_PAYLOAD_SIZE + 4] = {0};
+
+            int bytesReceived = llread(DATApacket);
+
+            if (DATApacket[0] != TYPE_DATA || DATApacket[1] != packetNum) {
+                printf("Error receiving data packet\n");
                 fclose(file);
                 exit(-1);
             }
 
-            if (packet[1] != packetNumber) {
-                printf("Error receiving data packet! Wrong packet number.\n");
-                fclose(file);
-                exit(-1);
-            }
+            if (bytesReceived > 0) {
+                int p_size = DATApacket[2] * 256 + DATApacket[3];
 
-            if (bytesSent > 0) {
-                int size = packet[2] * 256 + packet[3];
-                memcpy(buffer, &packet[4], size);
+                for (int i = 0; i < p_size; i++) {
+                    temp[i] = DATApacket[4 + i];
+                }
+                bytesWrittenIntoNewFile += fwrite(temp, 1, p_size, file);
 
-                bytesWritten += fwrite(buffer, 1, size, file);
-                printf("Written %d bytes\n", bytesWritten);
-
-                packetNumber = (packetNumber + 1) % 100;
+                packetNum++;
             }
         }
-        if (receiveControlPacket(PACKET_END, &filesize) != 0) {
-            printf("Error receiving control packet!\n");
+
+        unsigned char CTRLpacket_END[MAX_PAYLOAD_SIZE] = {0};
+
+        llread(CTRLpacket_END);
+
+        if (CTRLpacket_END[0] != TYPE_END || CTRLpacket_END[1] != FILE_SIZE || CTRLpacket_END[2] != 4) {
+            printf("Error receiving the first bytes of control packet END\n");
             fclose(file);
             exit(-1);
         }
-        printf("File reception successful\n");
+
+        f_size = (CTRLpacket_END[3] << 24) | (CTRLpacket_END[4] << 16) | (CTRLpacket_END[5] << 8) | CTRLpacket_END[6];
+        printf("\nControl packet END received successfully!\n\n");
+
+        printf("File reception successful!\n");
         fclose(file);
-        return;
     }
 
+
     if (llclose(1) < 0) {
-        printf("Error closing link layer connection\n");
+        printf("Error closing currently open connection\n");
+    } else {
+        printf("\nConnection closed successfully!\n\n");
     }
 }
